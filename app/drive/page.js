@@ -42,25 +42,32 @@ export default function Drive() {
   const fileInput = useRef(null);
 
   const loadQuota = useCallback(async () => {
-    const q = await fetch("/api/quota").then((r) => r.json());
+    const q = await fetch("/api/quota", { cache: "no-store" }).then((r) => r.json());
     setQuota(q);
   }, []);
 
   const loadDrive = useCallback(async (fid) => {
     setLoading(true);
-    const d = await fetch("/api/list?folderId=" + fid).then((r) => r.json());
-    setData(d); setLoading(false);
+    try {
+      const r = await fetch("/api/list?folderId=" + fid, { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok || d.error) { toast(d.error || "Failed to load files", { type: "error" }); }
+      setData({ folders: d.folders || [], files: d.files || [], breadcrumb: d.breadcrumb && d.breadcrumb.length ? d.breadcrumb : [{ id: "root", name: "My Drive" }] });
+    } catch (e) {
+      toast("Failed to load files", { type: "error" });
+      setData({ folders: [], files: [], breadcrumb: [{ id: "root", name: "My Drive" }] });
+    } finally { setLoading(false); }
   }, []);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const d = await fetch("/api/files").then((r) => r.json());
+    const d = await fetch("/api/files", { cache: "no-store" }).then((r) => r.json());
     setAllFiles(d.files); setLoading(false);
   }, []);
 
   useEffect(() => { loadQuota(); }, [loadQuota]);
   useEffect(() => {
-    if (view === "drive") loadDrive(folderId);
+    if (view === "drive") { loadDrive(folderId); if (folderId === "root") loadAll(); }
     else loadAll();
   }, [view, folderId, loadDrive, loadAll]);
 
@@ -74,7 +81,7 @@ export default function Drive() {
     toast(file.name + " backed up to cloud", { type: "success" });
     setTimeout(() => setUploads((u) => u.filter((x) => x.id !== localId)), 1500);
     loadQuota();
-    if (view === "drive") loadDrive(folderId); else loadAll();
+    if (view === "drive") { loadDrive(folderId); if (folderId === "root") loadAll(); } else loadAll();
   }
 
   async function handleFiles(files) {
@@ -214,6 +221,11 @@ export default function Drive() {
 
   const list = currentList();
   const usedPct = (quota.used / quota.total) * 100;
+  const isHome = view === "drive" && folderId === "root" && !search.trim();
+  const homeFolders = data.folders.map((f) => ({ ...f, _kind: "folder" }));
+  const liveFiles = allFiles.filter((f) => !f.trashed);
+  const recentFiles = [...liveFiles].sort((a, b) => b.createdAt - a.createdAt).map((f) => ({ ...f, _kind: "file" }));
+  const sharedFiles = liveFiles.filter((f) => sharedIds.has(f.id)).map((f) => ({ ...f, _kind: "file" }));
 
   return (
     <div className="h-screen flex flex-col bg-bl-mist" onClick={() => setMenu(null)}>
@@ -311,6 +323,13 @@ export default function Drive() {
 
             {loading ? (
               <div className="grid place-items-center h-64 text-bl-slate"><Loader2 className="animate-spin" /></div>
+            ) : isHome ? (
+              <HomeView
+                folders={homeFolders} recent={recentFiles} shared={sharedFiles}
+                onOpenFolder={openFolder} onOpenFile={setPreview}
+                onMenu={(x, y, item) => setMenu({ x, y, item })}
+                onViewMore={(v) => { setView(v); setFolderId("root"); }}
+                onUpload={pickFiles} onNewFolder={() => setNewFolderOpen(true)} />
             ) : list.length === 0 ? (
               <Empty view={view} onUpload={pickFiles} />
             ) : layout === "grid" ? (
@@ -579,6 +598,90 @@ function ConfirmModal({ item, onClose, onConfirm }) {
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" onClick={() => onConfirm(item)}>Delete forever</Button></>}>
       <p className="text-sm text-bl-slate"><b className="text-bl-ink">{item.name}</b> will be permanently deleted from cloud storage. This cannot be undone.</p>
     </Modal>
+  );
+}
+
+function HomeView({ folders, recent, shared, onOpenFolder, onOpenFile, onMenu, onViewMore, onUpload, onNewFolder }) {
+  const [showAllFolders, setShowAllFolders] = useState(false);
+  const FOLDER_LIMIT = 6, FILE_LIMIT = 6;
+  const visibleFolders = showAllFolders ? folders : folders.slice(0, FOLDER_LIMIT);
+
+  if (folders.length === 0 && recent.length === 0) return <Empty view="drive" onUpload={onUpload} />;
+
+  const fileGrid = (items) => (
+    <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))" }}>
+      {items.map((item) => (
+        <GridCard key={item.id} item={item} onOpen={() => onOpenFile(item)} onMenu={(x, y) => onMenu(x, y, item)} />
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-8">
+      {/* quick action banner */}
+      <div className="bl-gradient-soft border border-orange-100 rounded-2xl p-4 flex flex-wrap items-center gap-3">
+        <div className="bl-gradient w-11 h-11 rounded-xl grid place-items-center text-white"><CloudUpload size={22} /></div>
+        <div className="flex-1 min-w-[180px]">
+          <div className="font-bold text-bl-ink">Welcome to your cloud</div>
+          <div className="text-sm text-bl-slate">Upload files, create folders, and share securely.</div>
+        </div>
+        <Button onClick={onUpload}><Upload size={16} /> New upload</Button>
+        <Button variant="outline" onClick={onNewFolder}><FolderPlus size={16} /> New folder</Button>
+      </div>
+
+      {folders.length > 0 && (
+        <section>
+          <SectionHeader title="Folders" count={folders.length}
+            action={folders.length > FOLDER_LIMIT ? { label: showAllFolders ? "Show less" : "View more", onClick: () => setShowAllFolders((v) => !v) } : null} />
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(210px,1fr))" }}>
+            {visibleFolders.map((f) => (
+              <FolderChip key={f.id} folder={f} onOpen={() => onOpenFolder(f)} onMenu={(x, y) => onMenu(x, y, f)} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recent.length > 0 && (
+        <section>
+          <SectionHeader title="Recent uploads" count={recent.length}
+            action={recent.length > FILE_LIMIT ? { label: "View more", onClick: () => onViewMore("recent") } : null} />
+          {fileGrid(recent.slice(0, FILE_LIMIT))}
+        </section>
+      )}
+
+      {shared.length > 0 && (
+        <section>
+          <SectionHeader title="Shared" count={shared.length}
+            action={shared.length > FILE_LIMIT ? { label: "View more", onClick: () => onViewMore("shared") } : null} />
+          {fileGrid(shared.slice(0, FILE_LIMIT))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function SectionHeader({ title, count, action }) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <h2 className="text-base font-bold text-bl-ink">{title}{count ? <span className="text-bl-slate font-medium text-sm"> ({count})</span> : null}</h2>
+      {action && (
+        <button onClick={action.onClick} className="text-sm font-semibold text-bl-orange hover:underline inline-flex items-center gap-0.5">
+          {action.label} <ChevronRight size={15} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FolderChip({ folder, onOpen, onMenu }) {
+  return (
+    <div onClick={onOpen} onContextMenu={(e) => { e.preventDefault(); onMenu(e.clientX, e.clientY); }}
+      className="group flex items-center gap-3 bg-white rounded-xl border border-bl-line px-3.5 py-3 hover:shadow-soft hover:border-bl-orange/40 cursor-pointer transition">
+      <FolderIcon size={22} />
+      <div className="min-w-0 flex-1"><div className="text-sm font-semibold text-bl-ink truncate">{folder.name}</div></div>
+      <button onClick={(e) => { e.stopPropagation(); onMenu(e.clientX, e.clientY); }}
+        className="p-1 rounded-md hover:bg-bl-mist text-bl-slate opacity-0 group-hover:opacity-100"><MoreVertical size={16} /></button>
+    </div>
   );
 }
 
