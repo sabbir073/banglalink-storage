@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html, body { height: 100%; }
+body { background: #F6F7FB; color: #16161D; -webkit-font-smoothing: antialiased; }
+
+.bl-gradient { background: linear-gradient(135deg, #F36F21 0%, #FDB913 100%); }
+.bl-gradient-soft { background: linear-gradient(135deg, rgba(243,111,33,.10), rgba(253,185,19,.10)); }
+.scroll-thin::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #d9dae3; border-radius: 8px; border: 2px solid #f6f7fb; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes pop { from { transform: scale(.96); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+.animate-pop { animation: pop .14s ease-out; }
+@keyframes slideup { from { transform: translateY(8px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+.animate-slideup { animation: slideup .18s ease-out; }
